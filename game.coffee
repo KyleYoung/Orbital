@@ -19,7 +19,7 @@ for own team, position of {'G':{orbit: 2, rotation: gaRot}, 'E':{orbit: 1, rotat
     orbits[position.orbit][position.rotation].push fleet
 
 printSpace = ->
-  console.log Array(36).join("="), "JUPITER", Array(37).join("=")
+  console.log Array(30).join("="), "JUPITER", Array(30).join("=")
   l = orbits.length
   for orbit, orbitIndex in orbits
     o = orbit
@@ -29,14 +29,14 @@ printSpace = ->
     orbitSteps = (Math.pow 2, 2 + oi) - 1
     ods = orbitDisplaySize
     os = orbitSteps
-    console.log oi, (Array(ods).join(" ") for j in [0..os]).join("|")
+    console.log oi, (Array(ods + 1).join(" ") for j in [0..os]).join("|")
 
     for rotation, rotationIndex in orbit
       r = rotation
       ri = rotationIndex
       
       for mass in rotation
-        console.log Array((ods + 1) * ri).join(" "), mass.disp
+        console.log "  ", Array((ods + 1) * ri).join(" "), mass.disp
 
 turn = 0
 
