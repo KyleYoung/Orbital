@@ -80,6 +80,7 @@ promptForMove = ->
   else
     debug "moveQueue is ready"
     activeMass = moveQueue[0]
+    printSpace()
     console.log "Orders for #{activeMass.disp}: "
     inputCallback = (input) ->
       move = input.replace /^\s+|\s+$/g, ""
@@ -92,7 +93,6 @@ promptForMove = ->
         else
           moveQueue[0].queueMove = move
           moveQueue = moveQueue[1..]
-      printSpace()
       promptForMove()
 
 legalMove = (move) ->
@@ -105,9 +105,9 @@ commitMoves = ->
   debug "commitMoves. updating the current orbit and turn"
   if orbitTurn is ORBITS - 1
     orbitTurn = 0
-    turn += 1
   else
     orbitTurn += 1
+  turn += 1
   debug "commitMoves. Calling next orbit #{orbitTurn}"
   playOrbit()
 
@@ -122,24 +122,60 @@ pendingMoves = ->
 makeMoves = (moves) ->
   for mass in moves
     debug "Making move for #{mass.disp}"
-    # remove from current orbit/rotation
     debug "Removing from current rotation"
-    location = orbits[mass.orbit][mass.rotation].indexOf(mass)
-    debug "Location of mass: #{location}"
-    #orbits[mass.orbit][mass.rotation] = orbits[mass.orbit][mass.rotation].splice(location, 1)
     orbits[mass.orbit][mass.rotation] = (m for m in orbits[mass.orbit][mass.rotation] when m isnt mass)
     newLocation = calculateMove(mass.orbit, mass.rotation, mass.queueMove)
-    # place in new orbit/rotation
+    placeMass(mass, newLocation)
+    cleanupMass(mass)
+
+cleanupMass = (mass) ->
+  debug "Clearing queueMove, setting lastMove and Turn"
+  mass.lastMove = mass.queueMove
+  mass.queueMove = undefined
+  mass.turn += 1
+
+placeMass = (mass, newLocation) ->
+  if survives mass, newLocation
     debug "Setting new location parameters: orbit #{newLocation.orbit} rot #{newLocation.rotation}"
     mass.orbit = newLocation.orbit
     mass.rotation = newLocation.rotation
     debug "Placing mass in new orbit"
     orbits[mass.orbit][mass.rotation].push(mass)
-    # clear queue move, and set lastMove and turn
-    debug "Clearing queueMove, setting lastMove and Turn"
-    mass.lastMove = mass.queueMove
-    mass.queueMove = undefined
-    mass.turn += 1
+  else
+    console.log "#{mass.disp} destroyed"
+
+survives = (mass, newLocation) ->
+  nl = newLocation
+  enemyMoons = (m for m in orbits[nl.orbit][nl.rotation] when m.type is
+    'moon' and m.team isnt mass.team and m.team?)
+  enemyShips = (m for m in orbits[nl.orbit][nl.rotation] when m.type is
+    'fleet' and m.team isnt mass.team)
+  if mass.type is 'moon'
+    if enemyShips.length > 0
+      # destroy all enemy ships
+      for s in enemyShips
+        destroyShip(s)
+    true
+  else
+    if enemyMoons.length > 0
+      false
+    else
+      if enemyShips.length > 0
+        if enemyShips.length is 1
+          # destroy enemy and survive
+          destroyShip(enemyShips[0])
+          true
+        else
+          # destroy one enemy and die
+          destroyShip(enemyShips[0])
+          false
+      else
+        true
+
+destroyShip = (ship) ->
+  console.log "#{ship.disp} destroyed"
+  nu_set = (m for m in orbits[ship.orbit][ship.rotation] when m isnt ship)
+  orbits[ship.orbit][ship.rotation] = nu_set
 
 calculateMove = (orbit, rotation, move) ->
   debug "Calculating movement from orbit #{orbit}/#{rotation} #{move}"
