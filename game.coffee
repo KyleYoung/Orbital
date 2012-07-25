@@ -86,6 +86,8 @@ playOrbit = ->
   debug "#{mCount} items to be moved this turn #{turn}"
   if not checkVictory()
     promptForMove()
+  else
+    inputCallback = (input) ->
 
 
 checkVictory = ->
