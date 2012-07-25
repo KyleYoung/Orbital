@@ -7,13 +7,23 @@ stdin.on 'data', (input) -> inputCallback input
 debug = (message) ->
   # console.log message
 
-ORBITS = 4
-orbits = ((Array() for i in [0...2 * Math.pow 2, o]) for o in [1..ORBITS])
 
-# Movement variables
+# Constants
+ORBITS = 4
+
+# # Movement variables
 fwd_ = "FOREWARD"
 in_ = "IN"
 out_ = "OUT"
+
+
+# State
+orbits = ((Array() for i in [0...2 * Math.pow 2, o]) for o in [1..ORBITS])
+
+turn = 0
+orbitTurn = 0
+moveQueue = Array(0)
+
 
 # Make the moons
 ioRot = 0
@@ -32,6 +42,7 @@ for own team, position of {'G':{orbit: 2, rotation: gaRot}, 'E':{orbit: 1, rotat
     fleet = {disp: "#{team.toLowerCase()}#{i}", team: team, turn: 0, lastMove: null, type: "fleet", orbit: position.orbit, rotation: position.rotation}
     orbits[position.orbit][position.rotation].push fleet
 
+# Utility
 printSpace = ->
   console.log Array(30).join("="), "JUPITER", Array(30).join("=")
   l = orbits.length
@@ -59,29 +70,54 @@ printSpace = ->
     console.log Array(67).join('_')
 
 
-turn = 0
-orbitTurn = 0
-moveQueue = Array(0)
-
+# Play
 playOrbit = ->
   orbit = orbits[orbitTurn]
+  mCount = 0
   for rotation in orbit
+    debug "Checking rotation: #{(m.turn for m in rotation)}"
     for mass in rotation when mass.turn is turn
+      debug "adding #{mass.disp} to move turn"
       if mass.type is "moon"
         mass.queueMove = fwd_
       else
         moveQueue.push(mass)
-  promptForMove()
+        mCount += 1
+  debug "#{mCount} items to be moved this turn #{turn}"
+  if not checkVictory()
+    promptForMove()
+
+
+checkVictory = ->
+  ships = {ga:[], eu:[]}
+  for orb in orbits
+    for rots in orb
+      for mass in rots when mass.type is 'fleet'
+        switch mass.team
+          when 'G' then ships.ga.push(mass)
+          when 'E' then ships.eu.push(mass)
+  if ships.ga.length is 0
+    console.log "Europa Wins"
+    true
+  else if ships.eu.length is 0
+    console.log "Ganymede Wins"
+    true
+  else
+    false
+
 
 promptForMove = ->
+  debug "Prompting move"
   if moveQueue.length is 0
-    debug "Move queue is empty: committing moves"
+    debug "Move queue is empty for orbit #{orbitTurn}: committing moves"
+    debug "Current orbit: #{((m.turn for m in r) for r in orbits[orbitTurn])}"
     commitMoves()
   else
     debug "moveQueue is ready"
     activeMass = moveQueue[0]
     printSpace()
     console.log "Orders for #{activeMass.disp}: "
+    debug "Info: turn: #{activeMass.turn} gturn: #{turn}"
     inputCallback = (input) ->
       move = input.replace /^\s+|\s+$/g, ""
       if !legalMove move
@@ -95,8 +131,10 @@ promptForMove = ->
           moveQueue = moveQueue[1..]
       promptForMove()
 
+
 legalMove = (move) ->
   move in ['f','i','o']
+
 
 commitMoves = ->
   debug "commitMoves. "
@@ -105,11 +143,12 @@ commitMoves = ->
   debug "commitMoves. updating the current orbit and turn"
   if orbitTurn is ORBITS - 1
     orbitTurn = 0
+    turn += 1
   else
     orbitTurn += 1
-  turn += 1
   debug "commitMoves. Calling next orbit #{orbitTurn}"
   playOrbit()
+
 
 pendingMoves = ->
   moving = Array()
@@ -119,14 +158,16 @@ pendingMoves = ->
         moving.push(mass)
   moving
 
+
 makeMoves = (moves) ->
   for mass in moves
     debug "Making move for #{mass.disp}"
     debug "Removing from current rotation"
     orbits[mass.orbit][mass.rotation] = (m for m in orbits[mass.orbit][mass.rotation] when m isnt mass)
     newLocation = calculateMove(mass.orbit, mass.rotation, mass.queueMove)
-    placeMass(mass, newLocation)
+    placeMass(mass, newLocation, moves)
     cleanupMass(mass)
+
 
 cleanupMass = (mass) ->
   debug "Clearing queueMove, setting lastMove and Turn"
@@ -134,8 +175,9 @@ cleanupMass = (mass) ->
   mass.queueMove = undefined
   mass.turn += 1
 
-placeMass = (mass, newLocation) ->
-  if survives mass, newLocation
+
+placeMass = (mass, newLocation, moves) ->
+  if survives mass, newLocation, moves
     debug "Setting new location parameters: orbit #{newLocation.orbit} rot #{newLocation.rotation}"
     mass.orbit = newLocation.orbit
     mass.rotation = newLocation.rotation
@@ -144,14 +186,15 @@ placeMass = (mass, newLocation) ->
   else
     console.log "#{mass.disp} destroyed"
 
-survives = (mass, newLocation) ->
+
+survives = (mass, newLocation, moves) ->
   nl = newLocation
   enemyMoons = (m for m in orbits[nl.orbit][nl.rotation] when m.type is
     'moon' and m.team isnt mass.team and m.team?)
   enemyShips = (m for m in orbits[nl.orbit][nl.rotation] when m.type is
-    'fleet' and m.team isnt mass.team)
+    'fleet' and m.team isnt mass.team and m not in moves)
   if mass.type is 'moon'
-    if enemyShips.length > 0
+    if enemyShips.length > 0 and mass.team?
       # destroy all enemy ships
       for s in enemyShips
         destroyShip(s)
@@ -172,10 +215,12 @@ survives = (mass, newLocation) ->
       else
         true
 
+
 destroyShip = (ship) ->
   console.log "#{ship.disp} destroyed"
   nu_set = (m for m in orbits[ship.orbit][ship.rotation] when m isnt ship)
   orbits[ship.orbit][ship.rotation] = nu_set
+
 
 calculateMove = (orbit, rotation, move) ->
   debug "Calculating movement from orbit #{orbit}/#{rotation} #{move}"
@@ -196,7 +241,8 @@ calculateMove = (orbit, rotation, move) ->
   if new_rotation is orbit_max_rotation
     new_rotation -= orbit_max_rotation
   orbit:new_orbit, rotation:new_rotation
-  
+
+
 isValidMove = (fleet, move) ->
   # legal orbit, and no sharp turns
   if fleet.orbit is ORBITS - 1 and move is out_
@@ -210,5 +256,8 @@ isValidMove = (fleet, move) ->
   else
     true
 
+
+# Initiate Game
 console.log "Welcome to Orbital"
 playOrbit()
+
