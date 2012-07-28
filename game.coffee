@@ -5,8 +5,52 @@ inputCallback = (input) ->
 stdin.on 'data', (input) -> inputCallback input
 
 debug = (message) ->
-  # console.log message
+  console.log message
 
+
+# Orbit Geometry Functions
+orbitRotationCount = (orbitIndex) ->
+  (Math.pow 2, 2 + orbitIndex)
+
+relativeOrbit = (orbit, rotation) ->
+  l = orbitRotationCount(orbit)
+  n = rotation
+  n - (Math.floor n/l) * l
+
+oppositePoint = (orbit, rotation) ->
+  l = orbitRotationCount(orbit)
+  n = rotation
+  relativeOrbit orbit, n - l / 2
+
+recursiveIn = (orbit, rotation) ->
+  if orbit is 0
+    []
+  else
+    subOrbit = orbit - 1
+    subRot = Math.floor rotation / 2
+    [{o:subOrbit, r:subRot},].concat recursiveIn subOrbit, subRot
+
+recursizeOut = (orbit, rotation) ->
+  if orbit is ORBITS - 1
+    []
+  else
+    proOrbit = orbit + 1
+    proRot1 = 2 * rotation
+    proRot2 = 2 * rotation + 1
+    r = [{o:proOrbit, r:proRot1},{o:proOrbit, r:proRot2}]
+    r = r.concat recursizeOut proOrbit, proRot1
+    r = r.concat recursizeOut proOrbit, proRot2
+    r
+
+eclipsedZones = (orbit, rotation) ->
+  # returns an array of all coordinates {o:, r:} that are eclipsed
+  zones = []
+  op = oppositePoint(orbit, rotation)
+  zones.push({o:orbit, r:op})
+  zones = zones.concat recursiveIn orbit, op
+  zones = zones.concat recursizeOut orbit, op
+  debug "Eclipsed Zones from point #{orbit}'#{rotation}: #{([z.o, z.r].toString() for z in zones).toString()}"
+  return zones
 
 # Constants
 ORBITS = 4
@@ -18,7 +62,11 @@ out_ = "OUT"
 
 
 # State
-orbits = ((Array() for i in [0...2 * Math.pow 2, o]) for o in [1..ORBITS])
+relays = []
+fleets = []
+moons = []
+
+orbits = ((Array() for i in [0...orbitRotationCount o]) for o in [0...ORBITS])
 
 turn = 0
 orbitTurn = 0
@@ -42,6 +90,14 @@ for own team, position of {'G':{orbit: 2, rotation: gaRot}, 'E':{orbit: 1, rotat
     fleet = {disp: "#{team.toLowerCase()}#{i}", team: team, turn: 0, lastMove: null, type: "fleet", orbit: position.orbit, rotation: position.rotation}
     orbits[position.orbit][position.rotation].push fleet
 
+# Make the relays
+# europa's
+orbits[1][relativeOrbit 1, euRot + 3].push name:"Euro Relay I", disp:'erI', type:"relay", team:'E', lastMove: null, turn: 0, orbit:1, rotation: relativeOrbit 1, euRot + 3
+orbits[1][relativeOrbit 1, euRot - 3].push name:"Euro Relay II", disp:'erII', type:"relay", team:'E', lastMove: null, turn: 0, orbit:1, rotation: relativeOrbit 1, euRot - 3
+# ganymede's
+orbits[2][relativeOrbit 2, gaRot + 5].push name:"Gan Relay I", disp:'grI', type:"relay", team:'G', lastMove: null, turn:0, orbit:2, rotation: relativeOrbit 2, gaRot + 5
+orbits[2][relativeOrbit 2, gaRot - 5].push name:"Gan Relay II", disp:'grII', type:"relay", team:'G', lastMove: null, turn:0, orbit:2, rotation: relativeOrbit 2, gaRot - 5
+
 # Utility
 printSpace = ->
   console.log Array(30).join("="), "JUPITER", Array(30).join("=")
@@ -51,10 +107,10 @@ printSpace = ->
     oi = orbitIndex
     # Grid math... fun stuff
     orbitDisplaySize = (Math.pow 2, (l - oi)) - 1
-    orbitSteps = (Math.pow 2, 2 + oi) - 1
+    orbitSteps = orbitRotationCount(oi)
     ods = orbitDisplaySize
     os = orbitSteps
-    console.log oi, (Array(ods + 1).join(" ") for j in [0..os]).join("|")
+    console.log oi, (Array(ods + 1).join(" ") for j in [0...os]).join("|")
 
     for rotation, rotationIndex in orbit
       r = rotation
@@ -78,11 +134,14 @@ playOrbit = ->
     debug "Checking rotation: #{(m.turn for m in rotation)}"
     for mass in rotation when mass.turn is turn
       debug "adding #{mass.disp} to move turn"
-      if mass.type is "moon"
+      if mass.type is "moon" or mass.type is "relay"
         mass.queueMove = fwd_
       else
-        moveQueue.push(mass)
-        mCount += 1
+        if mass.type is 'fleet' and inCommunication mass
+          moveQueue.push(mass)
+          mCount += 1
+        else
+          mass.queueMove = driftMove(mass)
   debug "#{mCount} items to be moved this turn #{turn}"
   if not checkVictory()
     promptForMove()
@@ -107,6 +166,47 @@ checkVictory = ->
   else
     false
 
+
+inCommunication = (mass) ->
+  relays = []
+  for orb in orbits
+    for rots in orb
+      for ms in rots when ms.type is 'relay' and ms.team is mass.team
+        relays.push(ms)
+  if relays.length > 0
+    true
+  else
+    debug "#{mass.team} has no comms relays... checking for comms channels"
+    if inDarkRange mass
+      false
+    else
+      true
+
+
+inDarkRange = (mass) ->
+  homeMoon = undefined
+  for orb in orbits
+    for rots in orb
+      for ms in rots when ms.type is 'moon' and ms.team is mass.team
+        homeMoon = ms
+  ecplises = eclipsedZones homeMoon.orbit, homeMoon.rotation
+  eclipseCoordinates = ([z.o, z.r].join('`') for z in ecplises)
+  massCoordinate = [mass.orbit, mass.rotation].join('`')
+  
+  debug "Checking if #{massCoordinate} in #{eclipseCoordinates.join(', ')}"
+  if massCoordinate in eclipseCoordinates
+    true
+  else
+    false
+
+
+driftMove = (mass) ->
+  if mass.lastMove is in_ and mass.orbit is 0
+    fwd_
+  else if mass.lastMove is out_ and mass.orbit is ORBITS - 1
+    fwd_
+  else
+    mass.lastMove
 
 promptForMove = ->
   debug "Prompting move"
@@ -162,9 +262,10 @@ pendingMoves = ->
 
 
 makeMoves = (moves) ->
+  debug "Making moves:"
   for mass in moves
     debug "Making move for #{mass.disp}"
-    debug "Removing from current rotation"
+    debug "Removing from current rotation #{mass.orbit} #{mass.rotation}"
     orbits[mass.orbit][mass.rotation] = (m for m in orbits[mass.orbit][mass.rotation] when m isnt mass)
     newLocation = calculateMove(mass.orbit, mass.rotation, mass.queueMove)
     placeMass(mass, newLocation, moves)
@@ -195,27 +296,41 @@ survives = (mass, newLocation, moves) ->
     'moon' and m.team isnt mass.team and m.team?)
   enemyShips = (m for m in orbits[nl.orbit][nl.rotation] when m.type is
     'fleet' and m.team isnt mass.team and m not in moves)
-  if mass.type is 'moon'
-    if enemyShips.length > 0 and mass.team?
-      # destroy all enemy ships
-      for s in enemyShips
-        destroyShip(s)
-    true
-  else
-    if enemyMoons.length > 0
-      false
-    else
+  enemyRelays = (m for m in orbits[nl.orbit][nl.rotation] when m.type is
+    'relay' and m.team isnt mass.team and m not in moves)
+  switch mass.type
+    when 'moon'
+      if enemyShips.length > 0 and mass.team?
+       # destroy all enemy ships
+       for s in enemyShips
+         destroyShip(s)
+      true
+    when 'relay'
       if enemyShips.length > 0
-        if enemyShips.length is 1
-          # destroy enemy and survive
-          destroyShip(enemyShips[0])
-          true
-        else
-          # destroy one enemy and die
-          destroyShip(enemyShips[0])
-          false
+        false
       else
         true
+    when 'fleet'
+      if enemyMoons.length > 0
+        false
+      else
+        if enemyShips.length > 0
+          if inCommunication enemyShips[0]
+            if enemyShips.length is 1
+              # destroy enemy and survive
+              destroyShip(enemyShips[0])
+              true
+            else
+              # destroy one enemy and die
+              destroyShip(enemyShips[0])
+              false
+          else
+            # drifting ships are sitting ducks
+            destroyShip enemy for enemy in enemyShips
+        else
+          if enemyRelays.length > 0
+            destroyShip enemyRelays[0]
+          true
 
 
 destroyShip = (ship) ->
@@ -239,8 +354,8 @@ calculateMove = (orbit, rotation, move) ->
     else
       console.log "[ERROR] Unknown move: #{move}"
   # check for complete rotation
-  orbit_max_rotation = (Math.pow 2, 2 + new_orbit)
-  if new_rotation is orbit_max_rotation
+  orbit_max_rotation = orbitRotationCount(new_orbit)
+  if new_rotation >= orbit_max_rotation
     new_rotation -= orbit_max_rotation
   orbit:new_orbit, rotation:new_rotation
 
